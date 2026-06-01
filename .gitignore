@@ -11,6 +11,9 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Compiled server binary (built via `make build` / `go build`)
+/url-detect
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
