@@ -1,6 +1,6 @@
-# URL Detect
+# URL Detect (PoC)
 
-> Extracts a low-cardinality **pattern** from a URL using a local LLM (via [Kronk](https://github.com/ardanlabs/kronk)).
+> Extracts a low-cardinality **pattern** from a URL using a mix of heuristic and local LLM based detections.
 
 Dynamic segments (ids, UUIDs,
 hashes, usernames, slugs) become named placeholders so the result is stable
@@ -16,6 +16,8 @@ enough to use as a metric/span label. Query strings and fragments are dropped.
 
 It runs as an HTTP server: `POST /patterns` with one URL (`{"url":"..."}`) or
 many (`{"urls":[...]}`) returns the pattern for each.
+
+Uses [kronk](https://github.com/ardanlabs/kronk) for local LLM integration.
 
 ## Run
 
