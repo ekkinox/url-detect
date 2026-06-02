@@ -7,21 +7,42 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ardanlabs/kronk/sdk/kronk"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
 )
 
-// maxAttempts is how many times we ask the model before falling back to the
-// pure-Go heuristic classification.
+// maxAttempts is how many times we ask the model for one segment before giving
+// up and falling back to the Go heuristic value for that segment.
 const maxAttempts = 3
 
-// ExtractPattern turns a concrete URL into a low-cardinality pattern. All
-// structural work AND placeholder naming are deterministic; the model only
-// answers, per segment, whether it is a dynamic identifier. That answer is
-// validated, with a fallback to a Go heuristic.
-func ExtractPattern(ctx context.Context, krn *kronk.Kronk, url string) (string, error) {
+// Extractor turns URLs into low-cardinality patterns. It holds the shared,
+// single loaded model and a gate that bounds the number of concurrent model
+// calls to NSeqMax (the model's parallel-sequence capacity). Segment
+// classification within a URL is fanned out concurrently through that gate.
+type Extractor struct {
+	krn  *kronk.Kronk
+	gate chan struct{}
+}
+
+// newExtractor creates an Extractor whose concurrent model calls are capped at
+// nSeqMax, matching the model's parallel sequence capacity.
+func newExtractor(krn *kronk.Kronk, nSeqMax int) *Extractor {
+	return &Extractor{
+		krn:  krn,
+		gate: make(chan struct{}, nSeqMax),
+	}
+}
+
+// Extract turns a concrete URL into a low-cardinality pattern. All structural
+// work AND placeholder naming are deterministic; the model only answers, per
+// segment, whether it is a dynamic identifier. Each segment the heuristic can't
+// already resolve is classified concurrently (bounded by the gate), and the
+// model can only promote a segment to dynamic — never demote one the heuristic
+// is already sure about.
+func (e *Extractor) Extract(ctx context.Context, url string) (string, error) {
 	p := parseURL(url)
 
 	debugf("--- resolution ---")
@@ -35,33 +56,69 @@ func ExtractPattern(ctx context.Context, krn *kronk.Kronk, url string) (string, 
 		return url, nil
 	}
 
-	// The Go heuristic confidently catches numeric/UUID/hash/slug IDs. The
-	// model's job is only to ADD the human-readable identifiers the heuristic
-	// misses (usernames, org slugs). We therefore OR the two: the model can
-	// promote a segment to dynamic but can never demote one the heuristic is
-	// sure about, which prevents a weak model from dropping an obvious ID.
+	// The Go heuristic confidently catches numeric/UUID/hash/slug IDs and the
+	// REST collection-id convention; those segments are final and need no model
+	// call. Only the remaining (heuristic-static) segments are sent to the
+	// model, each in its own goroutine, to catch human-readable identifiers the
+	// heuristic misses (e.g. an id after a singular resource).
 	guesses := heuristicDynamic(p.segments)
 	debugf("heuristic : %s", fmtFlags(p.segments, guesses))
 
-	dynamic := guesses
-	source := "heuristic only (model fallback)"
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		got, err := classifySegments(ctx, krn, p.segments, guesses)
-		if err != nil {
-			debugf("attempt %d : model call failed: %v", attempt, err)
+	dynamic := make([]bool, len(p.segments))
+	copy(dynamic, guesses)
+	notes := make([]string, len(p.segments))
+
+	var wg sync.WaitGroup
+	for i := range p.segments {
+		if guesses[i] {
+			notes[i] = "heuristic"
 			continue
 		}
-		if err := validate(p.segments, got); err != nil {
-			debugf("attempt %d : rejected model output: %v", attempt, err)
+		// The first segment is the route root (api, users, ...) — it is never a
+		// bare identifier in practice, so don't spend a model call on it (and
+		// avoid the model wrongly flagging it dynamic). A leading numeric/UUID is
+		// still caught by the heuristic above.
+		if i == 0 {
+			notes[i] = "root-static"
 			continue
 		}
-		debugf("model     : %s (attempt %d)", fmtFlags(p.segments, got), attempt)
-		dynamic = orFlags(guesses, got)
-		source = "heuristic OR model"
-		break
+		if confidentlyStatic(p.segments[i]) {
+			notes[i] = "static-rule"
+			continue
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			prev := ""
+			if i > 0 {
+				prev = p.segments[i-1]
+			}
+
+			switch got, err := e.classifySegment(ctx, prev, p.segments[i]); {
+			case err != nil:
+				notes[i] = "model-err" // keep heuristic (static)
+			case got:
+				dynamic[i] = true
+				notes[i] = "model-DYN"
+			default:
+				notes[i] = "model-static"
+			}
+		}()
+	}
+	wg.Wait()
+
+	queried := 0
+	for _, n := range notes {
+		if strings.HasPrefix(n, "model") {
+			queried++
+		}
 	}
 
-	debugf("combined  : %s [%s]", fmtFlags(p.segments, dynamic), source)
+	debugf("classify  : %s", fmtNotes(p.segments, notes))
+	debugf("llm calls : %d segment(s) sent to the model (of %d)", queried, len(p.segments))
+	debugf("combined  : %s", fmtFlags(p.segments, dynamic))
 
 	tokens := applyDynamic(p.segments, dynamic)
 	debugf("tokens    : %v", tokens)
@@ -96,14 +153,14 @@ func fmtFlags(segments []string, flags []bool) string {
 	return strings.Join(parts, " ")
 }
 
-// orFlags combines the heuristic and model classifications: a segment is
-// dynamic if either source says so.
-func orFlags(a, b []bool) []bool {
-	out := make([]bool, len(a))
-	for i := range a {
-		out[i] = a[i] || b[i]
+// fmtNotes renders each segment with how it was decided, e.g.
+// "users=heuristic 7=heuristic john=model-DYN".
+func fmtNotes(segments []string, notes []string) string {
+	parts := make([]string, len(segments))
+	for i, seg := range segments {
+		parts[i] = fmt.Sprintf("%s=%s", seg, notes[i])
 	}
-	return out
+	return strings.Join(parts, " ")
 }
 
 // -----------------------------------------------------------------------------
@@ -209,6 +266,19 @@ func isCollectionNoun(seg string) bool {
 	return collectionNounRE.MatchString(seg)
 }
 
+// versionRE matches an API version token such as "v1" or "v2".
+var versionRE = regexp.MustCompile(`^v[0-9]+$`)
+
+// confidentlyStatic reports whether a (heuristic-static) segment is so clearly a
+// fixed route name that it needs no model call: a plural collection noun
+// (users, sessions), a version token (v2), or a known sub-resource/action word
+// (settings, me, search). Skipping these is the main speed-up — most segments
+// resolve with zero model calls, leaving only genuinely ambiguous ones (e.g. an
+// identifier after a singular resource like /user/john) for the model.
+func confidentlyStatic(seg string) bool {
+	return isCollectionNoun(seg) || versionRE.MatchString(seg) || subResourceWords[seg]
+}
+
 // afterCollection applies the REST convention: the segment immediately after a
 // plural collection noun is that collection's identifier (users/john -> john),
 // unless it is itself a collection noun (a sub-collection) or a known
@@ -285,107 +355,104 @@ func singularize(s string) string {
 }
 
 // -----------------------------------------------------------------------------
-// Guardrail: validate the model output is structurally consistent with input.
+// Model classification. The model never sees slashes; it only decides, for a
+// single segment (given its predecessor as context), whether it is dynamic.
 
-func validate(segments []string, dynamic []bool) error {
-	if len(dynamic) != len(segments) {
-		return fmt.Errorf("got %d flags, want %d", len(dynamic), len(segments))
-	}
-	return nil
-}
-
-// -----------------------------------------------------------------------------
-// Model classification. The model never sees slashes; it only decides, per
-// segment, whether to keep it or replace it with a placeholder.
-
-type segmentHint struct {
-	Index   int    `json:"i"`
+// segmentInput is the per-segment classification request sent to the model.
+type segmentInput struct {
+	Prev    string `json:"prev"`
 	Segment string `json:"segment"`
-	Guess   bool   `json:"guessDynamic"`
 }
 
-func classifySegments(ctx context.Context, krn *kronk.Kronk, segments []string, guesses []bool) ([]bool, error) {
+// classifySegment asks the model whether a single path segment is a dynamic
+// identifier, given the preceding segment as context. The call is bounded by
+// the Extractor gate so concurrent model calls never exceed NSeqMax.
+func (e *Extractor) classifySegment(ctx context.Context, prev, seg string) (bool, error) {
+	// Acquire a model-call slot (or bail if the request is cancelled).
+	select {
+	case e.gate <- struct{}{}:
+		defer func() { <-e.gate }()
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	hints := make([]segmentHint, len(segments))
-	for i := range segments {
-		hints[i] = segmentHint{Index: i, Segment: segments[i], Guess: guesses[i]}
-	}
-	hintsJSON, err := json.Marshal(hints)
+	in, err := json.Marshal(segmentInput{Prev: prev, Segment: seg})
 	if err != nil {
-		return nil, fmt.Errorf("marshal hints: %w", err)
+		return false, fmt.Errorf("marshal input: %w", err)
 	}
 
 	schema := model.D{
 		"type": "object",
 		"properties": model.D{
-			"dynamic": model.D{
-				"type":  "array",
-				"items": model.D{"type": "boolean"},
-			},
+			"dynamic": model.D{"type": "boolean"},
 		},
 		"required": []string{"dynamic"},
 	}
 
 	d := model.D{
 		"messages": model.DocumentArray(
-			model.TextMessage(model.RoleSystem, systemPrompt),
-			model.TextMessage(model.RoleUser, string(hintsJSON)),
+			model.TextMessage(model.RoleSystem, segmentSystemPrompt),
+			model.TextMessage(model.RoleUser, string(in)),
 		),
 		"enable_thinking": false,
 		"json_schema":     schema,
 		"temperature":     0.0,
-		"max_tokens":      256,
+		"max_tokens":      16,
 	}
 
-	resp, err := krn.Chat(ctx, d)
-	if err != nil {
-		return nil, fmt.Errorf("chat: %w", err)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := e.krn.Chat(ctx, d)
+		if err != nil {
+			lastErr = fmt.Errorf("chat: %w", err)
+			debugf("  llm[%-12s] prev=%-10q attempt=%d ERROR: %v", seg, prev, attempt, err)
+			continue
+		}
+
+		content := strings.TrimSpace(resp.Choices[0].Message.Content)
+		debugf("  llm[%-12s] prev=%-10q attempt=%d resp=%s", seg, prev, attempt, content)
+
+		var parsed struct {
+			Dynamic bool `json:"dynamic"`
+		}
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			lastErr = fmt.Errorf("unmarshal model output %q: %w", content, err)
+			continue
+		}
+
+		return parsed.Dynamic, nil
 	}
 
-	content := strings.TrimSpace(resp.Choices[0].Message.Content)
-
-	var parsed struct {
-		Dynamic []bool `json:"dynamic"`
-	}
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return nil, fmt.Errorf("unmarshal model output %q: %w", content, err)
-	}
-
-	return parsed.Dynamic, nil
+	return false, lastErr
 }
 
-const systemPrompt = `You classify URL PATH SEGMENTS to reduce cardinality for metrics and traces.
+const segmentSystemPrompt = `You classify ONE URL path segment to reduce cardinality for metrics and traces.
 
-You are given a JSON array of path segments in order. Each item has:
-- "segment": the literal text of that path segment
-- "guessDynamic": a heuristic guess of whether the segment is dynamic
+Input JSON: {"prev":"<the previous path segment, or empty>","segment":"<the segment to classify>"}
 
-For EACH item, return a boolean: true if the segment is DYNAMIC, false if it is STATIC.
-- STATIC: a fixed resource or route name shared by many requests (api, v2, users, files, sessions, orders, posts, builds, ...).
-- DYNAMIC: a per-entity identifier unique to one entity: a number, a UUID, a hash, a long or short random hex/alphanumeric token (e.g. "9f3a", "a1b2c3d4"), a USERNAME, an org/team/project slug, or an id-bearing slug like "order-9f3a8821".
+Return {"dynamic":true} if SEGMENT is a value unique to one entity:
+a number, a UUID, a hash, a random hex/alphanumeric token (e.g. "9f3a", "a1b2c3d4"),
+a username, an account/org/team/project slug, or any id-bearing slug ("order-9f3a8821").
 
-The "guessDynamic" hint is reliable for numeric and long-hash IDs, but it MISSES human-readable identifiers such as usernames ("john") and slugs ("acme") and short tokens ("9f3a") — mark those true even when the guess is false.
+Return {"dynamic":false} if SEGMENT is a fixed name shared by many requests:
+an API version or resource/collection/route name (api, v2, users, orders, files,
+sessions, projects, builds), or an action/sub-resource word (search, settings, me,
+new, export).
 
-KEY RULE: the segment immediately AFTER a collection noun (a plural resource name like users, sessions, orders, projects, files, teams, repos) is that collection's IDENTIFIER. Mark it DYNAMIC even when it reads like an ordinary word (users/john -> john is dynamic; orgs/acme -> acme is dynamic). This applies ANYWHERE in the path, not only near the start (api/v2/users/john -> john is dynamic). The only exception is when that following segment is itself a sub-resource/collection noun or an action word (e.g. users/settings, users/search, users/me) — those stay STATIC.
-
-The FIRST segment is almost always a static collection name (api, users, orgs, ...). Do not mark it dynamic unless it is clearly an identifier.
+Use "prev" as context: a segment that directly follows a resource/collection name
+is usually that resource's IDENTIFIER, even when it reads like an ordinary word.
 
 EXAMPLES:
-Input: [{"i":0,"segment":"api","guessDynamic":false},{"i":1,"segment":"v2","guessDynamic":false},{"i":2,"segment":"users","guessDynamic":false},{"i":3,"segment":"42","guessDynamic":true}]
-Output: {"dynamic":[false,false,false,true]}
+{"prev":"","segment":"api"} -> {"dynamic":false}
+{"prev":"api","segment":"v2"} -> {"dynamic":false}
+{"prev":"v2","segment":"users"} -> {"dynamic":false}
+{"prev":"users","segment":"john"} -> {"dynamic":true}
+{"prev":"users","segment":"settings"} -> {"dynamic":false}
+{"prev":"user","segment":"john"} -> {"dynamic":true}
+{"prev":"orders","segment":"42"} -> {"dynamic":true}
+{"prev":"projects","segment":"acme-prod"} -> {"dynamic":true}
 
-Input: [{"i":0,"segment":"users","guessDynamic":false},{"i":1,"segment":"john","guessDynamic":false},{"i":2,"segment":"sessions","guessDynamic":false},{"i":3,"segment":"9f3a2b1c","guessDynamic":true}]
-Output: {"dynamic":[false,true,false,true]}
-
-Input: [{"i":0,"segment":"api","guessDynamic":false},{"i":1,"segment":"v2","guessDynamic":false},{"i":2,"segment":"users","guessDynamic":false},{"i":3,"segment":"john","guessDynamic":false},{"i":4,"segment":"sessions","guessDynamic":false},{"i":5,"segment":"a1b2c3d4e5f6a1b2","guessDynamic":true}]
-Output: {"dynamic":[false,false,false,true,false,true]}
-
-Input: [{"i":0,"segment":"orgs","guessDynamic":false},{"i":1,"segment":"acme","guessDynamic":false},{"i":2,"segment":"projects","guessDynamic":false},{"i":3,"segment":"12","guessDynamic":true},{"i":4,"segment":"builds","guessDynamic":false},{"i":5,"segment":"9f3a","guessDynamic":true}]
-Output: {"dynamic":[false,true,false,true,false,true]}
-
-Input: [{"i":0,"segment":"users","guessDynamic":false},{"i":1,"segment":"settings","guessDynamic":false}]
-Output: {"dynamic":[false,false]}
-
-Return JSON: {"dynamic":[ ... ]} with EXACTLY one boolean per input item, in the SAME order. Do not add, remove, or reorder items. Return ONLY the JSON document.`
+Return ONLY the JSON document {"dynamic":true} or {"dynamic":false}.`

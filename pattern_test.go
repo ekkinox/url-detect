@@ -68,17 +68,6 @@ func TestApplyDynamic(t *testing.T) {
 	}
 }
 
-func TestValidate(t *testing.T) {
-	in := []string{"users", "7"}
-
-	if err := validate(in, []bool{false, true}); err != nil {
-		t.Errorf("valid flags rejected: %v", err)
-	}
-	if err := validate(in, []bool{false}); err == nil {
-		t.Error("wrong length accepted")
-	}
-}
-
 func TestSingularize(t *testing.T) {
 	tests := map[string]string{
 		"users":      "user",
