@@ -114,6 +114,10 @@ in both modes:
 default. Latency is per *model call*; most URLs are settled by the Go rules with
 no call at all (see [Configuration](#configure) to switch `MODEL`).
 
+Scores have ±2 of run-to-run jitter: the model is not fully deterministic
+(concurrent decoding + KV-cache reuse), so a couple of borderline judgments
+(e.g. is `checkout` an action or a value?) flip between runs.
+
 Takeaways:
 
 - **Qwen3-1.7B-Q4 is the accuracy winner (67/68).** Its one miss is a deep

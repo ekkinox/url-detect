@@ -114,6 +114,13 @@ func (e *Extractor) Extract(ctx context.Context, url string) (string, error) {
 			notes[i] = "after-id-static"
 			continue
 		}
+		// Forward alternation: a word that follows a collection AND is immediately
+		// followed by an identifier is a sub-resource NAME — the id is the next
+		// segment, not this one (e.g. videos/metadata/1 -> metadata static, 1 id).
+		if i+1 < len(p.segments) && afterCollection(p.segments, i) && looksDynamic(p.segments[i+1]) {
+			notes[i] = "before-id-static"
+			continue
+		}
 
 		// Ambiguous word — ask the model. coll tells it whether this segment
 		// follows a collection (prior leans dynamic) or a plain word (prior leans
