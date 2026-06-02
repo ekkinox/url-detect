@@ -7,7 +7,7 @@
 # ----- Configuration --------------------------------------------------------
 
 # Model to bake into the image and serve (any GGUF model id Kronk can fetch).
-MODEL     ?= unsloth/Qwen3-1.7B-Q8_0
+MODEL     ?= unsloth/Qwen3-1.7B-Q4_K_M
 # Host/container port the HTTP server listens on.
 PORT      ?= 8080
 # Max concurrent in-flight extractions (llama.cpp parallel sequences).

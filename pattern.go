@@ -36,6 +36,25 @@ func newExtractor(krn *kronk.Kronk, nSeqMax int) *Extractor {
 	}
 }
 
+// Warm primes the model's incremental cache (IMC) so the shared system prompt
+// is already cached in every sequence before real traffic arrives. The first
+// call on a cold sequence pays a one-time prefill of the whole system prompt
+// (seconds on CPU); by firing one dummy classification per sequence here, that
+// cost is paid once at startup instead of on the first user requests. Errors
+// are ignored — warming is best-effort.
+func (e *Extractor) Warm(ctx context.Context) {
+	n := cap(e.gate)
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = e.classifySegment(ctx, "warmup", "warmup")
+		}()
+	}
+	wg.Wait()
+}
+
 // Extract turns a concrete URL into a low-cardinality pattern. All structural
 // work AND placeholder naming are deterministic; the model only answers, per
 // segment, whether it is a dynamic identifier. Each segment the heuristic can't
@@ -84,6 +103,15 @@ func (e *Extractor) Extract(ctx context.Context, url string) (string, error) {
 		}
 		if confidentlyStatic(p.segments[i]) {
 			notes[i] = "static-rule"
+			continue
+		}
+		// REST alternates collection/id/sub-resource/id/... so a word-like
+		// segment that follows an identifier is a sub-resource NAME, not another
+		// id. Keep it static and don't risk the model mislabelling it (e.g.
+		// /utilisateurs/{id}/voiture/1 — "voiture" must stay static). A genuine
+		// id after an id (e.g. a number) is shape-detected by the heuristic above.
+		if guesses[i-1] {
+			notes[i] = "after-id-static"
 			continue
 		}
 

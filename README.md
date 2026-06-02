@@ -1,7 +1,8 @@
-# url-detect
+# URL Detect
 
-Extracts a low-cardinality **pattern** from a URL using a local LLM (via
-[Kronk](https://github.com/ardanlabs/kronk)). Dynamic segments (ids, UUIDs,
+> Extracts a low-cardinality **pattern** from a URL using a local LLM (via [Kronk](https://github.com/ardanlabs/kronk)).
+
+Dynamic segments (ids, UUIDs,
 hashes, usernames, slugs) become named placeholders so the result is stable
 enough to use as a metric/span label. Query strings and fragments are dropped.
 
@@ -41,7 +42,7 @@ Override any of these on the `make` command line (defaults shown):
 
 | Variable | Default                   | Meaning                                  |
 | -------- | ------------------------- | ---------------------------------------- |
-| `MODEL`  | `unsloth/Qwen3-1.7B-Q8_0` | GGUF model to bake in and serve          |
+| `MODEL`  | `unsloth/Qwen3-1.7B-Q4_K_M` | GGUF model to bake in and serve        |
 | `PORT`   | `8080`                    | HTTP port                                |
 | `NSEQ`   | `4`                       | Max concurrent model calls (parallelism) |
 

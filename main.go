@@ -37,7 +37,7 @@ import (
 // placeholder naming, and strong ID detection; the LLM only adds the
 // human-readable-identifier judgment (usernames, org slugs). 0.6B handles the
 // structure but misses those, so 1.7B is the cheap/fast sweet spot.
-var modelSource = envStr("MODEL", "unsloth/Qwen3-1.7B-Q8_0")
+var modelSource = envStr("MODEL", "unsloth/Qwen3-1.7B-Q4_K_M")
 
 func main() {
 	// "warmup" downloads the libraries and model, then exits. It is run during

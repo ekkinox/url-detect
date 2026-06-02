@@ -63,6 +63,13 @@ func serve(krn *kronk.Kronk, addr string, nSeqMax int) error {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 
+	// Prime the system-prompt cache across all sequences so user requests don't
+	// pay the one-time cold prefill.
+	fmt.Printf("priming cache (%d sequences)...\n", nSeqMax)
+	warmCtx, warmCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	srv.ex.Warm(warmCtx)
+	warmCancel()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
