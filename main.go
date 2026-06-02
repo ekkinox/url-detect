@@ -146,11 +146,15 @@ func newKronk(mp models.Path, nSeqMax int) (*kronk.Kronk, error) {
 	// NSeqMax sets how many sequences the single model instance can process in
 	// parallel. The context window is shared across sequences, so size it to
 	// give each sequence room for our prompt (~1.5k tokens) plus output.
+	//
+	// We intentionally do NOT pass model.WithLog here: Kronk's per-inference
+	// logging (batch-engine, imc, sampler, ...) is very verbose and would bury
+	// our own resolution trace. Library/model download logs still go through
+	// kronk.FmtLogger in installSystem.
 	krn, err := kronk.New(
 		model.WithModelFiles(mp.ModelFiles),
 		model.WithNSeqMax(nSeqMax),
 		model.WithContextWindow(nSeqMax*2048),
-		model.WithLog(kronk.FmtLogger),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create inference model: %w", err)
