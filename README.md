@@ -90,17 +90,10 @@ make eval PORT=9000    # target a non-default port
 Pattern comparison ignores a leading slash, so expected patterns may be written
 with or without it.
 
-## Run without Docker
-
-```shell
-make run     # serves on :8080; first run downloads llama.cpp + the model
-make test    # unit tests (no model needed)
-```
-
 This needs Go 1.26+ and the `kronk` repo checked out alongside this one
 (`../kronk`, referenced by a `replace` in `go.mod`).
 
-## Benchmark: model comparison
+## Benchmark
 
 Head-to-head on the 68-case `eval.json` set (CPU, `NSEQ=4`), via `make eval`
 in both modes:
