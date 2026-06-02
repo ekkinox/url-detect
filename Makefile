@@ -14,6 +14,8 @@ PORT      ?= 8080
 NSEQ      ?= 4
 # eval mode: "single" (one request per URL, timed each) or "batch" (all at once).
 MODE      ?= single
+# URL to send with `make query`; empty uses a built-in sample batch.
+URL       ?=
 
 # Image / container naming.
 IMAGE     ?= url-detect:latest
@@ -78,10 +80,16 @@ docker-stop: ## Stop the running container
 	-docker stop $(CONTAINER)
 
 .PHONY: query
-query: ## Send a sample batch request to the running server
-	curl -s -X POST http://localhost:$(PORT)/patterns \
-		-H 'Content-Type: application/json' \
-		-d '{"urls":["/users/7/","/api/v2/users/john/sessions/a1b2c3d4e5f6a1b2?limit=10","/orgs/acme/projects/12/builds/9f3a","/users/me"]}'
+query: ## Query the server. Pass URL='/your/url' for one URL, else a sample batch
+	@if [ -n "$(URL)" ]; then \
+		curl -s -X POST http://localhost:$(PORT)/patterns \
+			-H 'Content-Type: application/json' \
+			-d "{\"url\":\"$(URL)\"}"; \
+	else \
+		curl -s -X POST http://localhost:$(PORT)/patterns \
+			-H 'Content-Type: application/json' \
+			-d '{"urls":["/users/7/","/api/v2/users/john/sessions/a1b2c3d4e5f6a1b2?limit=10","/orgs/acme/projects/12/builds/9f3a","/users/me"]}'; \
+	fi
 	@echo
 
 .PHONY: eval

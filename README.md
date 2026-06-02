@@ -60,6 +60,13 @@ make docker-run   MODEL=unsloth/Qwen3-0.6B-Q8_0 PORT=9000 NSEQ=8
 ## Query
 
 ```shell
+make query                              # a built-in sample batch
+make query URL='/api/v2/users/3'        # your own URL
+```
+
+Or with curl directly:
+
+```shell
 # single URL
 curl -s -X POST http://localhost:8080/patterns \
   -H 'Content-Type: application/json' \
