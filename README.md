@@ -17,7 +17,7 @@ enough to use as a metric/span label. Query strings and fragments are dropped.
 It runs as an HTTP server: `POST /patterns` with one URL (`{"url":"..."}`) or
 many (`{"urls":[...]}`) returns the pattern for each.
 
-## Run it
+## Run
 
 Everything goes through the Makefile. `make` on its own lists the targets.
 
@@ -26,11 +26,15 @@ Everything goes through the Makefile. `make` on its own lists the targets.
 #    so the container starts ready to serve — no runtime download).
 make docker-build
 
-# 2. Run it (serves on :8080).
+# 2. Run it (serves on :8080 by default).
 make docker-run
 
 # 3. In another terminal, send a sample request.
 make query
+# or via curl with your own URL
+curl -s -X POST http://localhost:8080/patterns \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"/api/v2/users/3"}'
 ```
 
 Stop it with `Ctrl-C`, or `make docker-stop` if you started it detached
@@ -61,7 +65,7 @@ curl -s -X POST http://localhost:8080/patterns \
   -H 'Content-Type: application/json' \
   -d '{"url":"/api/v2/users/3"}'
 
-# batch
+# batch URLs
 curl -s -X POST http://localhost:8080/patterns \
   -H 'Content-Type: application/json' \
   -d '{"urls":["/users/7/","/orgs/acme/projects/12/builds/9f3a","/users/me"]}'
@@ -95,3 +99,31 @@ make test    # unit tests (no model needed)
 
 This needs Go 1.26+ and the `kronk` repo checked out alongside this one
 (`../kronk`, referenced by a `replace` in `go.mod`).
+
+## Benchmark: model comparison
+
+Head-to-head on the 68-case `eval.json` set (CPU, `NSEQ=4`), via `make eval`
+in both modes:
+
+| Model (`MODEL=`)               | Single | Batch | Single avg | Batch wall |
+| ------------------------------ | ------ | ----- | ---------- | ---------- |
+| `unsloth/Qwen3-1.7B-Q4_K_M`    | 67/68  | 67/68 | 412 ms     | 21.8 s     |
+| `LiquidAI/LFM2-1.2B-Q4_K_M`    | 59/68  | 60/68 | 245 ms     | 15.3 s     |
+| `unsloth/gemma-3-1b-it-Q4_K_M` | 59/68  | 59/68 | 347 ms     | 20.3 s     |
+
+`Single`/`Batch` are correct cases out of 68; `Qwen3-1.7B-Q4_K_M` is the current
+default. Latency is per *model call*; most URLs are settled by the Go rules with
+no call at all (see [Configuration](#configure) to switch `MODEL`).
+
+Takeaways:
+
+- **Qwen3-1.7B-Q4 is the accuracy winner (67/68).** Its one miss is a deep
+  `/collection/{TypeName}/{opaqueId}` case (a known limitation of the
+  "word-after-id stays static" rule, not the model).
+- **LFM2-1.2B is the speed winner (~1.7× faster)** but ~59/68: it misses keyword
+  demotions (`active`, `stripe`, `api`) and occasionally drops a real id
+  (`/utilisateur/marie`). A good fallback when throughput matters more than the
+  last ~12% of accuracy.
+- **gemma-3-1b** is slower than LFM2 and no more accurate here.
+- The few-shot prompt is tuned for Qwen; those gains do **not** fully transfer to
+  the smaller models, which is part of why they score lower.
