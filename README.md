@@ -69,6 +69,23 @@ curl -s -X POST http://localhost:8080/patterns \
 
 `GET /healthz` returns `ok`.
 
+## Evaluate
+
+`eval.json` is a labeled dataset (`[{"url": ..., "pattern": ...}]`) of diverse,
+multilingual URLs with hard-to-classify static/dynamic segments. `make eval`
+sends them to a running server, checks each result against the expected
+pattern, and prints a per-URL PASS/FAIL/ERROR with timing plus a recap.
+
+```shell
+make eval              # single mode: one request per URL, each timed
+make eval MODE=batch   # batch mode: all URLs in one request, timed as a whole
+make eval PORT=9000    # target a non-default port
+```
+
+`single` measures per-URL latency; `batch` exercises the in-server concurrency.
+Pattern comparison ignores a leading slash, so expected patterns may be written
+with or without it.
+
 ## Run without Docker
 
 ```shell

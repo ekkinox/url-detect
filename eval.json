@@ -1,0 +1,274 @@
+[
+  {
+    "url": "/users/me/addresses/1234",
+    "pattern": "users/me/addresses/{addressId}"
+  },
+  {
+    "url": "/api/v2/orders/8891/items/3",
+    "pattern": "api/v2/orders/{orderId}/items/{itemId}"
+  },
+  {
+    "url": "/api/v2.5/orders/8891/items/3",
+    "pattern": "api/v2.5/orders/{orderId}/items/{itemId}"
+  },
+  {
+    "url": "/users/42/posts/hello-world",
+    "pattern": "users/{userId}/posts/{postId}"
+  },
+  {
+    "url": "/users/42/posts?limit=10#anchor",
+    "pattern": "users/{userId}/posts"
+  },
+  {
+    "url": "/health",
+    "pattern": "health"
+  },
+  {
+    "url": "/search",
+    "pattern": "search"
+  },
+  {
+    "url": "/shop/checkout",
+    "pattern": "shop/checkout"
+  },
+  {
+    "url": "/dashboard/sales",
+    "pattern": "dashboard/sales"
+  },
+  {
+    "url": "/accounts/me/settings",
+    "pattern": "accounts/me/settings"
+  },
+  {
+    "url": "/projects/active",
+    "pattern": "projects/active"
+  },
+  {
+    "url": "/files/550e8400-e29b-41d4-a716-446655440000",
+    "pattern": "files/{fileId}"
+  },
+  {
+    "url": "/repos/acme/website/commits/9f8e7d6",
+    "pattern": "repos/{repoId}/website/commits/{commitId}"
+  },
+  {
+    "url": "/utilisateurs/didier/voitures/1",
+    "pattern": "utilisateurs/{utilisateurId}/voitures/{voitureId}"
+  },
+  {
+    "url": "/utilisateurs/didier/voiture/1",
+    "pattern": "utilisateurs/{utilisateurId}/voiture/{voitureId}"
+  },
+  {
+    "url": "/utilisateur/marie",
+    "pattern": "utilisateur/{utilisateurId}"
+  },
+  {
+    "url": "/boutique/panier",
+    "pattern": "boutique/panier"
+  },
+  {
+    "url": "/produits/chaussures-rouges-42",
+    "pattern": "produits/{produitId}"
+  },
+  {
+    "url": "/commandes/A1B2C3/lignes/7",
+    "pattern": "commandes/{commandeId}/lignes/{ligneId}"
+  },
+  {
+    "url": "/usuarios/123/pedidos/abc",
+    "pattern": "usuarios/{usuarioId}/pedidos/{pedidoId}"
+  },
+  {
+    "url": "/tienda/carrito",
+    "pattern": "tienda/carrito"
+  },
+  {
+    "url": "/benutzer/max/einstellungen",
+    "pattern": "benutzer/{benutzerId}/einstellungen"
+  },
+  {
+    "url": "/bestellungen/4711",
+    "pattern": "bestellungen/{bestellungenId}"
+  },
+  {
+    "url": "/users/12345/orders/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b/items/42",
+    "pattern": "users/{userId}/orders/{orderId}/items/{itemId}"
+  },
+  {
+    "url": "/api/v2/users/12345/orders/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b/items/42",
+    "pattern": "/api/v2/users/{userId}/orders/{orderId}/items/{itemId}"
+  },
+  {
+    "url": "/api/v2/tenants/550e8400-e29b-41d4-a716-446655440000/projects/proj_a1B2c3",
+    "pattern": "api/v2/tenants/{tenantId}/projects/{projectId}"
+  },
+  {
+    "url": "/tweets/1234567890123456789",
+    "pattern": "tweets/{tweetId}"
+  },
+  {
+    "url": "/orgs/acme/teams/platform/members/u_8123ab",
+    "pattern": "orgs/{orgId}/teams/{teamId}/members/{memberId}"
+  },
+  {
+    "url": "/users/1/addresses",
+    "pattern": "users/{userId}/addresses"
+  },
+  {
+    "url": "/orders/5/items/9",
+    "pattern": "orders/{orderId}/items/{itemId}"
+  },
+  {
+    "url": "/sessions/550e8400-e29b-41d4-a716-446655440000",
+    "pattern": "sessions/{sessionId}"
+  },
+  {
+    "url": "/commits/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
+    "pattern": "commits/{commitId}"
+  },
+  {
+    "url": "/topics/28/comments",
+    "pattern": "topics/{topicId}/comments"
+  },
+  {
+    "url": "/users",
+    "pattern": "users"
+  },
+  {
+    "url": "/api/v2/health",
+    "pattern": "api/v2/health"
+  },
+  {
+    "url": "/",
+    "pattern": "/"
+  },
+  {
+    "url": "/events/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "pattern": "events/{eventId}"
+  },
+  {
+    "url": "/documents/507f1f77bcf86cd799439011",
+    "pattern": "documents/{documentId}"
+  },
+  {
+    "url": "/auth/tokens/eyJhbGciOiJIUzI1NiJ9",
+    "pattern": "auth/tokens/{tokenId}"
+  },
+  {
+    "url": "/wallets/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+    "pattern": "wallets/{walletId}"
+  },
+  {
+    "url": "/nodes/aBcDeFgH",
+    "pattern": "nodes/{nodeId}"
+  },
+  {
+    "url": "/i18n/translations/9c8b7a6f5e4d3c2b1a0f",
+    "pattern": "i18n/translations/{translationId}"
+  },
+  {
+    "url": "/12345/edit",
+    "pattern": "{id}/edit"
+  },
+  {
+    "url": "/1/2",
+    "pattern": "{id}/{id2}"
+  },
+  {
+    "url": "/api/v10/status",
+    "pattern": "api/v10/status"
+  },
+  {
+    "url": "/api/v10/status?system=abc",
+    "pattern": "api/v10/status"
+  },
+  {
+    "url": "/docs/api/v2/authentication#oauth-flow",
+    "pattern": "docs/api/v2/authentication"
+  },
+  {
+    "url": "/docs/api/v2.3.4/authentication#oauth-flow",
+    "pattern": "docs/api/v2.3.4/authentication"
+  },
+  {
+    "url": "/users/john%40example.com/profile",
+    "pattern": "users/{userId}/profile"
+  },
+  {
+    "url": "/files/2024%2F08%2Freport.pdf",
+    "pattern": "files/{fileId}"
+  },
+  {
+    "url": "/teams/5/members/10/teams/8",
+    "pattern": "teams/{teamId}/members/{memberId}/teams/{teamId2}"
+  },
+  {
+    "url": "/v1/products/SKU-12345-XL/reviews/?sort=recent#top",
+    "pattern": "v1/products/{productId}/reviews/"
+  },
+  {
+    "url": "/items?filter[status]=active&filter[type]=book",
+    "pattern": "items"
+  },
+  {
+    "url": "/benutzer/42/bestellungen/789",
+    "pattern": "benutzer/{benutzerId}/bestellungen/{bestellungenId}"
+  },
+  {
+    "url": "/utilisateurs/1234/commandes/abc123def456",
+    "pattern": "utilisateurs/{utilisateurId}/commandes/{commandeId}"
+  },
+  {
+    "url": "/articles/café-noir/données",
+    "pattern": "articles/{articleId}/données"
+  },
+  {
+    "url": "/produits/thé-vert-bio/avis",
+    "pattern": "produits/{produitId}/avis"
+  },
+  {
+    "url": "/utenti/567/ordini/MOD-2024-XYZ",
+    "pattern": "utenti/{utentiId}/ordini/{ordiniId}"
+  },
+  {
+    "url": "/users/john/addresses/42",
+    "pattern": "users/{userId}/addresses/{addressId}"
+  },
+  {
+    "url": "/users/john/sessions/a1b2c3d4e5f6a1b2",
+    "pattern": "users/{userId}/sessions/{sessionId}"
+  },
+  {
+    "url": "/orgs/acme/repos/dash0/issues/1234",
+    "pattern": "orgs/{orgId}/repos/{repoId}/issues/{issueId}"
+  },
+  {
+    "url": "/regions/us/cities/portland",
+    "pattern": "regions/{regionId}/cities/{cityId}"
+  },
+  {
+    "url": "/profiles/me",
+    "pattern": "profiles/me"
+  },
+  {
+    "url": "/profiles/alice",
+    "pattern": "profiles/{profileId}"
+  },
+  {
+    "url": "/assets/img/logo.png",
+    "pattern": "assets/img/logo.png"
+  },
+  {
+    "url": "/protocols/http2",
+    "pattern": "protocols/http2"
+  },
+  {
+    "url": "/api/payments/stripe/refunds/re_3MtwBwLkdIRHmr",
+    "pattern": "api/payments/stripe/refunds/{refundId}"
+  },
+  {
+    "url": "/messaging/classes/SNSChatParticipant/ba4f89jvw",
+    "pattern": "messaging/classes/SNSChatParticipant/{SNSChatParticipantId}"
+  }
+]

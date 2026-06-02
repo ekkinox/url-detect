@@ -12,6 +12,8 @@ MODEL     ?= unsloth/Qwen3-1.7B-Q4_K_M
 PORT      ?= 8080
 # Max concurrent in-flight extractions (llama.cpp parallel sequences).
 NSEQ      ?= 4
+# eval mode: "single" (one request per URL, timed each) or "batch" (all at once).
+MODE      ?= single
 
 # Image / container naming.
 IMAGE     ?= url-detect:latest
@@ -81,6 +83,10 @@ query: ## Send a sample batch request to the running server
 		-H 'Content-Type: application/json' \
 		-d '{"urls":["/users/7/","/api/v2/users/john/sessions/a1b2c3d4e5f6a1b2?limit=10","/orgs/acme/projects/12/builds/9f3a","/users/me"]}'
 	@echo
+
+.PHONY: eval
+eval: ## Evaluate eval.json against the server (MODE=single|batch; correctness + timing recap)
+	@python3 eval.py --url http://localhost:$(PORT)/patterns --file eval.json --mode $(MODE)
 
 # ----- Help -----------------------------------------------------------------
 

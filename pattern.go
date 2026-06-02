@@ -49,7 +49,7 @@ func (e *Extractor) Warm(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = e.classifySegment(ctx, "warmup", "warmup")
+			_, _ = e.classifySegment(ctx, "warmup", "warmup", false)
 		}()
 	}
 	wg.Wait()
@@ -75,58 +75,58 @@ func (e *Extractor) Extract(ctx context.Context, url string) (string, error) {
 		return url, nil
 	}
 
-	// The Go heuristic confidently catches numeric/UUID/hash/slug IDs and the
-	// REST collection-id convention; those segments are final and need no model
-	// call. Only the remaining (heuristic-static) segments are sent to the
-	// model, each in its own goroutine, to catch human-readable identifiers the
-	// heuristic misses (e.g. an id after a singular resource).
-	guesses := heuristicDynamic(p.segments)
-	debugf("heuristic : %s", fmtFlags(p.segments, guesses))
+	// prior[i] = "looks like an identifier": a confident token SHAPE (number,
+	// UUID, hash, id-slug) OR the REST collection-follow convention. Shapes are
+	// final. The collection-follow signal is only a *prior*: the segment after a
+	// collection is usually its id, but can be a fixed sub-resource/keyword
+	// (assets/img, classes/Foo, payments/stripe), so it is sent to the model to
+	// confirm or demote rather than decided here.
+	prior := heuristicDynamic(p.segments)
+	debugf("heuristic : %s", fmtFlags(p.segments, prior))
 
 	dynamic := make([]bool, len(p.segments))
-	copy(dynamic, guesses)
 	notes := make([]string, len(p.segments))
 
 	var wg sync.WaitGroup
 	for i := range p.segments {
-		if guesses[i] {
-			notes[i] = "heuristic"
+		seg := p.segments[i]
+
+		// Confident token shape -> dynamic, no model call.
+		if looksDynamic(seg) {
+			dynamic[i] = true
+			notes[i] = "shape"
 			continue
 		}
-		// The first segment is the route root (api, users, ...) — it is never a
-		// bare identifier in practice, so don't spend a model call on it (and
-		// avoid the model wrongly flagging it dynamic). A leading numeric/UUID is
-		// still caught by the heuristic above.
+		// The first segment is the route root (api, users, ...) — never a bare
+		// identifier in practice.
 		if i == 0 {
 			notes[i] = "root-static"
 			continue
 		}
-		if confidentlyStatic(p.segments[i]) {
+		// Plural collection / version / known sub-resource word -> static.
+		if confidentlyStatic(seg) {
 			notes[i] = "static-rule"
 			continue
 		}
 		// REST alternates collection/id/sub-resource/id/... so a word-like
-		// segment that follows an identifier is a sub-resource NAME, not another
-		// id. Keep it static and don't risk the model mislabelling it (e.g.
-		// /utilisateurs/{id}/voiture/1 — "voiture" must stay static). A genuine
-		// id after an id (e.g. a number) is shape-detected by the heuristic above.
-		if guesses[i-1] {
+		// segment following an identifier is a sub-resource NAME, not another id.
+		if prior[i-1] {
 			notes[i] = "after-id-static"
 			continue
 		}
 
+		// Ambiguous word — ask the model. coll tells it whether this segment
+		// follows a collection (prior leans dynamic) or a plain word (prior leans
+		// static), so it only overrides the obvious cases.
+		coll := afterCollection(p.segments, i)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-
-			prev := ""
-			if i > 0 {
-				prev = p.segments[i-1]
-			}
-
-			switch got, err := e.classifySegment(ctx, prev, p.segments[i]); {
+			got, err := e.classifySegment(ctx, p.segments[i-1], seg, coll)
+			switch {
 			case err != nil:
-				notes[i] = "model-err" // keep heuristic (static)
+				dynamic[i] = coll // fall back to the prior
+				notes[i] = "model-err"
 			case got:
 				dynamic[i] = true
 				notes[i] = "model-DYN"
@@ -388,14 +388,16 @@ func singularize(s string) string {
 
 // segmentInput is the per-segment classification request sent to the model.
 type segmentInput struct {
-	Prev    string `json:"prev"`
-	Segment string `json:"segment"`
+	Prev              string `json:"prev"`
+	Segment           string `json:"segment"`
+	FollowsCollection bool   `json:"followsCollection"`
 }
 
 // classifySegment asks the model whether a single path segment is a dynamic
-// identifier, given the preceding segment as context. The call is bounded by
-// the Extractor gate so concurrent model calls never exceed NSeqMax.
-func (e *Extractor) classifySegment(ctx context.Context, prev, seg string) (bool, error) {
+// identifier, given the preceding segment as context and whether it follows a
+// collection (the prior). The call is bounded by the Extractor gate so
+// concurrent model calls never exceed NSeqMax.
+func (e *Extractor) classifySegment(ctx context.Context, prev, seg string, followsCollection bool) (bool, error) {
 	// Acquire a model-call slot (or bail if the request is cancelled).
 	select {
 	case e.gate <- struct{}{}:
@@ -407,7 +409,7 @@ func (e *Extractor) classifySegment(ctx context.Context, prev, seg string) (bool
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	in, err := json.Marshal(segmentInput{Prev: prev, Segment: seg})
+	in, err := json.Marshal(segmentInput{Prev: prev, Segment: seg, FollowsCollection: followsCollection})
 	if err != nil {
 		return false, fmt.Errorf("marshal input: %w", err)
 	}
@@ -436,12 +438,12 @@ func (e *Extractor) classifySegment(ctx context.Context, prev, seg string) (bool
 		resp, err := e.krn.Chat(ctx, d)
 		if err != nil {
 			lastErr = fmt.Errorf("chat: %w", err)
-			debugf("  llm[%-12s] prev=%-10q attempt=%d ERROR: %v", seg, prev, attempt, err)
+			debugf("  llm[%-12s] prev=%-10q coll=%-5t attempt=%d ERROR: %v", seg, prev, followsCollection, attempt, err)
 			continue
 		}
 
 		content := strings.TrimSpace(resp.Choices[0].Message.Content)
-		debugf("  llm[%-12s] prev=%-10q attempt=%d resp=%s", seg, prev, attempt, content)
+		debugf("  llm[%-12s] prev=%-10q coll=%-5t attempt=%d resp=%s", seg, prev, followsCollection, attempt, content)
 
 		var parsed struct {
 			Dynamic bool `json:"dynamic"`
@@ -457,30 +459,37 @@ func (e *Extractor) classifySegment(ctx context.Context, prev, seg string) (bool
 	return false, lastErr
 }
 
-const segmentSystemPrompt = `You classify ONE URL path segment to reduce cardinality for metrics and traces.
+const segmentSystemPrompt = `You classify ONE URL path segment as dynamic (a per-entity value) or static (a fixed route/keyword), to reduce cardinality for metrics and traces.
 
-Input JSON: {"prev":"<the previous path segment, or empty>","segment":"<the segment to classify>"}
+Input JSON: {"prev":"<previous segment>","segment":"<segment to classify>","followsCollection":<bool>}
 
-Return {"dynamic":true} if SEGMENT is a value unique to one entity:
-a number, a UUID, a hash, a random hex/alphanumeric token (e.g. "9f3a", "a1b2c3d4"),
-a username, an account/org/team/project slug, or any id-bearing slug ("order-9f3a8821").
+dynamic=true  — a value unique to one entity: a number, a UUID, a hash, a random token,
+a username, an account/org/team/project/region/city name, or an id-bearing slug.
+dynamic=false — a fixed name shared by many requests: a resource/collection/route name,
+an action/sub-resource (search, settings, me, new), a version (v2, v10),
+a file or directory (img, css, main.css), a protocol/format/algorithm (http2, sha256, json),
+a known provider/brand (stripe, github, aws), or a CamelCase type name.
 
-Return {"dynamic":false} if SEGMENT is a fixed name shared by many requests:
-an API version or resource/collection/route name (api, v2, users, orders, files,
-sessions, projects, builds), or an action/sub-resource word (search, settings, me,
-new, export).
-
-Use "prev" as context: a segment that directly follows a resource/collection name
-is usually that resource's IDENTIFIER, even when it reads like an ordinary word.
+How to use "followsCollection":
+- true: SEGMENT follows a collection, so it is USUALLY that collection's identifier.
+  Answer dynamic=true UNLESS it is clearly one of the fixed keywords above
+  (file/dir, protocol/format, provider, version, CamelCase type, or a reserved word
+  like active/latest/me).
+- false: SEGMENT follows a non-collection word, so it is USUALLY a fixed sub-route.
+  Answer dynamic=false UNLESS it is clearly a value (a number, a hash, a username, a slug).
 
 EXAMPLES:
-{"prev":"","segment":"api"} -> {"dynamic":false}
-{"prev":"api","segment":"v2"} -> {"dynamic":false}
-{"prev":"v2","segment":"users"} -> {"dynamic":false}
-{"prev":"users","segment":"john"} -> {"dynamic":true}
-{"prev":"users","segment":"settings"} -> {"dynamic":false}
-{"prev":"user","segment":"john"} -> {"dynamic":true}
-{"prev":"orders","segment":"42"} -> {"dynamic":true}
-{"prev":"projects","segment":"acme-prod"} -> {"dynamic":true}
+{"prev":"users","segment":"john","followsCollection":true} -> {"dynamic":true}
+{"prev":"orgs","segment":"acme","followsCollection":true} -> {"dynamic":true}
+{"prev":"regions","segment":"us","followsCollection":true} -> {"dynamic":true}
+{"prev":"assets","segment":"img","followsCollection":true} -> {"dynamic":false}
+{"prev":"protocols","segment":"http2","followsCollection":true} -> {"dynamic":false}
+{"prev":"payments","segment":"stripe","followsCollection":true} -> {"dynamic":false}
+{"prev":"classes","segment":"SNSChatParticipant","followsCollection":true} -> {"dynamic":false}
+{"prev":"projects","segment":"active","followsCollection":true} -> {"dynamic":false}
+{"prev":"user","segment":"jane","followsCollection":false} -> {"dynamic":true}
+{"prev":"shop","segment":"checkout","followsCollection":false} -> {"dynamic":false}
+{"prev":"boutique","segment":"panier","followsCollection":false} -> {"dynamic":false}
+{"prev":"docs","segment":"api","followsCollection":false} -> {"dynamic":false}
 
 Return ONLY the JSON document {"dynamic":true} or {"dynamic":false}.`
