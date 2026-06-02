@@ -19,7 +19,7 @@ many (`{"urls":[...]}`) returns the pattern for each.
 
 ## Run
 
-Everything goes through the Makefile. `make` on its own lists the targets.
+Everything goes through the [Makefile](Makefile). Run `make` to list the available targets.
 
 ```shell
 # 1. Build the image (downloads llama.cpp + the model into the image,
@@ -31,7 +31,7 @@ make docker-run
 
 # 3. In another terminal, send a sample request.
 make query
-# or via curl with your own URL
+#    or via curl with your own URL
 curl -s -X POST http://localhost:8080/patterns \
   -H 'Content-Type: application/json' \
   -d '{"url":"/api/v2/users/3"}'
@@ -44,11 +44,11 @@ Stop it with `Ctrl-C`, or `make docker-stop` if you started it detached
 
 Override any of these on the `make` command line (defaults shown):
 
-| Variable | Default                   | Meaning                                  |
-| -------- | ------------------------- | ---------------------------------------- |
-| `MODEL`  | `unsloth/Qwen3-1.7B-Q4_K_M` | GGUF model to bake in and serve        |
-| `PORT`   | `8080`                    | HTTP port                                |
-| `NSEQ`   | `4`                       | Max concurrent model calls (parallelism) |
+| Variable | Default                     | Meaning                                  |
+|----------|-----------------------------|------------------------------------------|
+| `MODEL`  | `unsloth/Qwen3-1.7B-Q4_K_M` | GGUF model to bake in and serve          |
+| `PORT`   | `8080`                      | HTTP port                                |
+| `NSEQ`   | `4`                         | Max concurrent model calls (parallelism) |
 
 `MODEL` is baked in at build time, so pass it to **both** build and run:
 
@@ -75,7 +75,7 @@ curl -s -X POST http://localhost:8080/patterns \
 
 ## Evaluate
 
-`eval.json` is a labeled dataset (`[{"url": ..., "pattern": ...}]`) of diverse,
+[eval.json](eval.json) is a labeled dataset (`[{"url": ..., "pattern": ...}]`) of diverse,
 multilingual URLs with hard-to-classify static/dynamic segments. `make eval`
 sends them to a running server, checks each result against the expected
 pattern, and prints a per-URL PASS/FAIL/ERROR with timing plus a recap.
@@ -90,12 +90,9 @@ make eval PORT=9000    # target a non-default port
 Pattern comparison ignores a leading slash, so expected patterns may be written
 with or without it.
 
-This needs Go 1.26+ and the `kronk` repo checked out alongside this one
-(`../kronk`, referenced by a `replace` in `go.mod`).
-
 ## Benchmark
 
-Head-to-head on the 68-case `eval.json` set (CPU, `NSEQ=4`), via `make eval`
+Head-to-head on the 68-case [eval.json](eval.json) set (CPU, `NSEQ=4`), via `make eval`
 in both modes:
 
 | Model (`MODEL=`)               | Single | Batch | Single avg | Batch wall |
