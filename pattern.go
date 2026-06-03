@@ -449,6 +449,15 @@ func (e *Extractor) classifySegment(ctx context.Context, prev, seg string, follo
 			continue
 		}
 
+		// Some model/llama.cpp combinations return a response with no choices (or
+		// a nil message) instead of an error. Treat that as a failed attempt so we
+		// retry and ultimately fall back to the heuristic, rather than panicking.
+		if len(resp.Choices) == 0 || resp.Choices[0].Message == nil {
+			lastErr = fmt.Errorf("model returned no message")
+			debugf("  llm[%-12s] prev=%-10q coll=%-5t attempt=%d EMPTY (choices=%d)", seg, prev, followsCollection, attempt, len(resp.Choices))
+			continue
+		}
+
 		content := strings.TrimSpace(resp.Choices[0].Message.Content)
 		debugf("  llm[%-12s] prev=%-10q coll=%-5t attempt=%d resp=%s", seg, prev, followsCollection, attempt, content)
 
