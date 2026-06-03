@@ -46,18 +46,51 @@ Stop it with `Ctrl-C`, or `make docker-stop` if you started it detached
 
 Override any of these on the `make` command line (defaults shown):
 
-| Variable | Default                     | Meaning                                  |
-|----------|-----------------------------|------------------------------------------|
-| `MODEL`  | `unsloth/Qwen3-1.7B-Q4_K_M` | GGUF model to bake in and serve          |
-| `PORT`   | `8080`                      | HTTP port                                |
-| `NSEQ`   | `4`                         | Max concurrent model calls (parallelism) |
+| Variable    | Default                     | Meaning                                            |
+|-------------|-----------------------------|----------------------------------------------------|
+| `MODEL`     | `unsloth/Qwen3-1.7B-Q4_K_M` | GGUF model to bake in and serve                    |
+| `PROCESSOR` | *auto-detected*             | llama.cpp build: `cpu` / `vulkan` / `rocm` / `cuda` |
+| `PORT`      | `8080`                      | HTTP port                                          |
+| `NSEQ`      | `4`                         | Max concurrent model calls (parallelism)           |
 
-`MODEL` is baked in at build time, so pass it to **both** build and run:
+`MODEL` and `PROCESSOR` are baked in at build time, so pass them to **both**
+build and run:
 
 ```shell
 make docker-build MODEL=unsloth/Qwen3-0.6B-Q8_0
 make docker-run   MODEL=unsloth/Qwen3-0.6B-Q8_0 PORT=9000 NSEQ=8
 ```
+
+## GPU
+
+`PROCESSOR` selects which llama.cpp build is downloaded into the image and which
+GPU devices `docker-run` passes through. When unset, the **build host** is
+probed: NVIDIA → `cuda`, AMD → `vulkan`, a Vulkan loader → `vulkan`, else `cpu`.
+Because the libraries are baked at build time, set the same `PROCESSOR` on
+`docker-build` and `docker-run` (and build *on*, or for, the target GPU host).
+
+```shell
+# AMD (e.g. Radeon 7900XTX) — Vulkan: works on the slim base, no ROCm stack.
+make docker-build PROCESSOR=vulkan
+make docker-run   PROCESSOR=vulkan NSEQ=4
+
+# AMD via the ROCm stack (auto-selects a ROCm runtime base image).
+make docker-build PROCESSOR=rocm
+make docker-run   PROCESSOR=rocm NSEQ=2
+
+# NVIDIA (requires the NVIDIA Container Toolkit on the host).
+make docker-build PROCESSOR=cuda
+make docker-run   PROCESSOR=cuda
+```
+
+The model offloads all layers to the GPU automatically; no model is too small to
+run on CPU instead (`PROCESSOR=cpu`). `NSEQ` is the concurrency knob — each slot
+pre-allocates its own KV-cache partition, so it is bounded by VRAM (≈1–2 for a
+large model in 24 GB, 4–8 for a small one). The host must expose its GPU: AMD
+needs `/dev/dri` (and `/dev/kfd` for ROCm) with the `video`/`render` groups —
+the `docker-run` targets add these flags for you. On some hosts the in-container
+`render` group GID differs; if you hit a permissions error, pass the host's GID
+explicitly, e.g. `--group-add $(getent group render | cut -d: -f3)`.
 
 ## Query
 
@@ -104,11 +137,12 @@ with or without it.
 Head-to-head on the 68-case [eval.json](eval.json) set (CPU, `NSEQ=4`), via `make eval`
 in both modes:
 
-| Model (`MODEL=`)               | Single | Batch | Single avg | Batch wall |
-| ------------------------------ | ------ | ----- | ---------- | ---------- |
-| `unsloth/Qwen3-1.7B-Q4_K_M`    | 67/68  | 67/68 | 412 ms     | 21.8 s     |
-| `LiquidAI/LFM2-1.2B-Q4_K_M`    | 59/68  | 60/68 | 245 ms     | 15.3 s     |
-| `unsloth/gemma-3-1b-it-Q4_K_M` | 59/68  | 59/68 | 347 ms     | 20.3 s     |
+| Model (`MODEL=`)                     | Single | Batch | Single avg | Batch wall |
+| ------------------------------------ | ------ | ----- | ---------- | ---------- |
+| `unsloth/Qwen3-1.7B-Q4_K_M`          | 67/68  | 67/68 | 412 ms     | 21.8 s     |
+| `LiquidAI/LFM2-1.2B-Q4_K_M`          | 59/68  | 60/68 | 245 ms     | 15.3 s     |
+| `unsloth/gemma-3-1b-it-Q4_K_M`       | 59/68  | 59/68 | 347 ms     | 20.3 s     |
+| `unsloth/Qwen3.6-35B-A3B-UD-Q2_K_XL` | 66/68  | 66/68 | 1165 ms    | 56.0 s     |
 
 `Single`/`Batch` are correct cases out of 68; `Qwen3-1.7B-Q4_K_M` is the current
 default. Latency is per *model call*; most URLs are settled by the Go rules with
@@ -128,5 +162,10 @@ Takeaways:
   (`/utilisateur/marie`). A good fallback when throughput matters more than the
   last ~12% of accuracy.
 - **gemma-3-1b** is slower than LFM2 and no more accurate here.
+- **Qwen3.6-35B-A3B (2-bit Q2_K_XL)** does not pay off on this task: ~2.6–2.9×
+  slower on CPU and slightly *less* accurate (66/68). The LLM only adjudicates a
+  few ambiguous segments, so the extra capacity has little to bite on, and the
+  aggressive 2-bit quant plus a Qwen3-tuned prompt erase any edge. A GPU makes it
+  fast but not more accurate.
 - The few-shot prompt is tuned for Qwen; those gains do **not** fully transfer to
   the smaller models, which is part of why they score lower.
